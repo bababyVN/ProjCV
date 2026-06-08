@@ -1,0 +1,16 @@
+# Data & Outputs
+data/
+output/
+dataloader/images/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
