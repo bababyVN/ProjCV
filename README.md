@@ -8,7 +8,7 @@ It supports two main tasks:
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 Below is an overview of the directory structure and the roles of the key files:
 
@@ -58,7 +58,7 @@ ProjCv/
 
 ---
 
-## 🛠️ Key Architectural Details
+## Key Architectural Details
 
 ### 1. SwinFAN (`ARCH: "swinfan"`)
 - **Encoder (`encoder/swin_encoder.py`)**: Uses a pre-trained Swin Transformer (`swin_t`) as a backbone to learn hierarchical context with shifted-window self-attention. To keep fine details from high-resolution layers, we augment it with a lightweight CNN stem (outputs features at strides 1 and 2).
@@ -71,7 +71,7 @@ ProjCv/
 
 ---
 
-## 📊 Configurable Hyperparameters (`config.py`)
+## Configurable Hyperparameters (`config.py`)
 
 All hyperparameters, task settings, and classes are configured in a centralized dictionary `CFG` within `config.py`:
 - `TASK`: Switch between `"land_cover"` (7 classes) or `"road"` (binary classification, 1 class).
@@ -83,7 +83,7 @@ All hyperparameters, task settings, and classes are configured in a centralized 
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Install Dependencies
 Make sure you have Python installed, then set up the packages:
