@@ -2,6 +2,16 @@
 #  config.py — Global Configuration
 #  All hyperparameters and constants live here.
 #  Import with: from config import CFG, LC_CLASSES, LC_COLOR_TO_CLASS
+#
+#  Project: DeepGlobe Land Cover & Road Segmentation
+#  Institution: SOICT, Hanoi University of Science and Technology
+#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
+#  Members:
+#    Lê Hoàng Nam      - 20235536
+#    Ngô Nguyên Ngọc   - 20235538
+#    Nguyễn Trung Hải  - 20235495
+#    Phan Hải Nguyên   - 20235540
+#    Lê Quang Huy      - 20235503
 # =============================================================
 
 import torch
@@ -13,12 +23,19 @@ _PROJECT_ROOT = Path(__file__).resolve().parent
 # ─────────────────────────────────────────────────────────────
 # Main configuration dictionary
 # ─────────────────────────────────────────────────────────────
+# ── HOW TO SWITCH TASKS ──────────────────────────────────────
+#   Land Cover (7-class multi-label segmentation):
+#       "TASK": "land_cover",  "NUM_CLASSES": 7
+#   Road Extraction (binary segmentation):
+#       "TASK": "road",        "NUM_CLASSES": 1
+# ─────────────────────────────────────────────────────────────
 CFG = {
     # ── Task ──────────────────────────────────────────────────
-    # "land_cover" → 7-class multi-label segmentation
-    # "road"       → binary segmentation (1 class)
+    # "land_cover" → 7-class multi-label segmentation (DeepGlobe Land Cover)
+    # "road"       → binary segmentation (DeepGlobe Road Extraction)
     "TASK":          "land_cover",
-    "NUM_CLASSES":   7,
+    "NUM_CLASSES":   7,     # 7 for land_cover, 1 for road
+    "NUM_CLASSES_ROAD": 1,
 
     # ── Dataset Paths ──────────────────────────────────────────
     # Local paths — data is downloaded by download_dataset.py into data/train/
@@ -27,10 +44,11 @@ CFG = {
     "BEST_MODEL":    str(_PROJECT_ROOT / "output" / "best_model.pth"),
 
     # ── Image & Patch Sizes ────────────────────────────────────
-    # DeepGlobe full images are 2448×2448 px.
+    # DeepGlobe Land Cover full images are 2448×2448 px (50cm/px).
+    # DeepGlobe Road images are 1024×1024 px (50cm/px).
     # We crop them into smaller patches for GPU-efficient training.
     "IMG_SIZE":      512,    # Training patch size (H × W)
-    "FULL_SIZE":     2448,   # Original image resolution
+    "FULL_SIZE":     2448,   # Original image resolution (land_cover)
 
     # ── Training Hyperparameters ───────────────────────────────
     "EPOCHS":        30,
@@ -44,9 +62,10 @@ CFG = {
     "ETA_MIN":       1e-6,   # Minimum LR for CosineAnnealingLR
 
     # ── Model Architecture ─────────────────────────────────────
-    # "hybrid" → CustomHybridEncoder (CNN + Transformer) + UNetDecoder
-    # You can add more options here as you experiment.
-    "ARCH":          "hybrid",
+    # "swinfan" → SwinFAN: Swin Transformer Encoder + Attention-Guided Decoder
+    #             Implements the SwinFAN paper (Swin-based Focal Axial Network)
+    # "hybrid"  → Legacy: CustomHybridEncoder (CNN ResNet-34 + Transformer) + UNetDecoder
+    "ARCH":          "swinfan",
 
     # ── Loss Weights (FocalLoss + DiceLoss) ───────────────────
     "FOCAL_WEIGHT":  0.5,

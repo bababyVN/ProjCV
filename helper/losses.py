@@ -1,6 +1,17 @@
-# =============================================================
-#  losses.py — Loss Functions (Complete, no TODOs)
-#  Import with: from losses import HybridLoss
+﻿# =============================================================
+#  losses.py — Loss Functions (Multi-class & Binary)
+#
+#  Supports both:
+#    - Multi-class segmentation  (land_cover, NUM_CLASSES=7)
+#    - Binary segmentation       (road,       NUM_CLASSES=1)
+#
+#  HybridLoss = FocalLoss + DiceLoss (weighted combination)
+#
+#  Import with: from helper.losses import HybridLoss
+#
+#  Project: DeepGlobe Land Cover & Road Segmentation
+#  Institution: SOICT, Hanoi University of Science and Technology
+#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import sys
@@ -15,21 +26,28 @@ from config import CFG
 
 
 # ─────────────────────────────────────────────────────────────
-# Focal Loss
+# Focal Loss (multi-class AND binary)
 # ─────────────────────────────────────────────────────────────
 class FocalLoss(nn.Module):
     """
-    Focal Loss for multi-class semantic segmentation.
+    Focal Loss for semantic segmentation.
+
     Focuses training on hard, misclassified examples by
     down-weighting well-classified pixels.
 
-    FL(p_t) = -alpha * (1 - p_t)^gamma * log(p_t)
+        FL(p_t) = −α · (1 − p_t)^γ · log(p_t)
+
+    Supports:
+        • Multi-class : preds shape (B, C, H, W), C > 1
+                        Uses F.cross_entropy internally.
+        • Binary      : preds shape (B, 1, H, W) or (B, H, W), C = 1
+                        Uses F.binary_cross_entropy_with_logits.
 
     Args:
-        gamma        : Focusing parameter. Higher → more focus on
-                       hard examples. Typical: 2.0
-        alpha        : Base weighting factor. Typical: 0.25
-        ignore_index : Pixels with this label are excluded from loss.
+        gamma        : Focusing parameter. Higher → more focus on hard
+                       examples. Typical value: 2.0
+        alpha        : Base weighting factor. Typical value: 0.25
+        ignore_index : Pixels with this label are excluded (multi-class only).
     """
 
     def __init__(self, gamma: float = 2.0, alpha: float = 0.25,
@@ -43,44 +61,61 @@ class FocalLoss(nn.Module):
                 targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            preds   : (B, C, H, W) — raw logits (before softmax)
-            targets : (B, H, W)    — integer class indices
+            preds   : (B, C, H, W) — raw logits (before softmax/sigmoid).
+            targets : (B, H, W)    — integer class indices (multi-class)
+                      OR float binary labels in [0, 1] (binary).
 
         Returns:
-            Scalar loss tensor.
+            Scalar focal loss tensor.
         """
-        # Standard per-pixel cross-entropy (no reduction yet)
-        ce_loss = F.cross_entropy(
-            preds, targets,
-            ignore_index=self.ignore_index,
-            reduction="none",
-        )                                           # (B, H, W)
+        num_classes = preds.shape[1]
 
-        # p_t = probability assigned to the correct class
-        pt = torch.exp(-ce_loss)
+        if num_classes == 1:
+            # ── Binary mode (road extraction) ─────────────────
+            # Squeeze to (B, H, W), targets must be float [0, 1]
+            preds_sq = preds.squeeze(1)                             # (B, H, W)
+            targets_f = targets.float()
 
-        # Focal weight: down-weights easy pixels (high pt)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+            bce = F.binary_cross_entropy_with_logits(
+                preds_sq, targets_f, reduction="none"
+            )                                                       # (B, H, W)
+            pt          = torch.exp(-bce)
+            focal_loss  = self.alpha * (1 - pt) ** self.gamma * bce
+            return focal_loss.mean()
 
-        return focal_loss.mean()
+        else:
+            # ── Multi-class mode (land_cover) ─────────────────
+            ce_loss = F.cross_entropy(
+                preds, targets.long(),
+                ignore_index=self.ignore_index,
+                reduction="none",
+            )                                                       # (B, H, W)
+            pt          = torch.exp(-ce_loss)
+            focal_loss  = self.alpha * (1 - pt) ** self.gamma * ce_loss
+            return focal_loss.mean()
 
 
 # ─────────────────────────────────────────────────────────────
-# Dice Loss
+# Dice Loss (multi-class AND binary)
 # ─────────────────────────────────────────────────────────────
 class DiceLoss(nn.Module):
     """
-    Soft Dice Loss for multi-class segmentation.
-    Directly optimises the Dice coefficient (= F1 score per class)
-    and handles class imbalance better than cross-entropy alone.
+    Soft Dice Loss for semantic segmentation.
 
-    Dice = (2 * |X ∩ Y|) / (|X| + |Y|)
-    Loss = 1 - mean(Dice per class)
+    Directly optimises the Dice coefficient (= F1 score per class)
+    which handles class imbalance better than cross-entropy alone.
+
+        Dice   = (2 · |X ∩ Y|) / (|X| + |Y|)
+        Loss   = 1 − mean(Dice per class)
+
+    Supports:
+        • Multi-class : preds (B, C, H, W), C > 1 → one-hot + softmax
+        • Binary      : preds (B, 1, H, W), C = 1 → sigmoid
 
     Args:
         num_classes  : Number of segmentation classes.
         smooth       : Small constant to prevent division by zero.
-        ignore_index : Pixels with this label are excluded.
+        ignore_index : Pixels with this label are excluded (multi-class only).
     """
 
     def __init__(self, num_classes: int = 7,
@@ -94,53 +129,64 @@ class DiceLoss(nn.Module):
                 targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            preds   : (B, C, H, W) — raw logits
-            targets : (B, H, W)    — integer class indices
+            preds   : (B, C, H, W) — raw logits.
+            targets : (B, H, W)    — integer class indices (multi-class)
+                      OR float binary labels in [0, 1] (binary).
 
         Returns:
-            Scalar loss tensor.
+            Scalar Dice loss tensor.
         """
-        # Softmax → per-class probabilities
-        probs = F.softmax(preds, dim=1)             # (B, C, H, W)
+        if self.num_classes == 1:
+            # ── Binary mode ───────────────────────────────────
+            probs    = torch.sigmoid(preds.squeeze(1))   # (B, H, W)
+            targets_f = targets.float()
 
-        # Build valid-pixel mask (exclude ignore_index)
-        valid   = (targets != self.ignore_index)    # (B, H, W) bool
-        targets = targets.clone()
-        targets[~valid] = 0                         # neutral class (won't affect dice)
+            inter = (probs * targets_f).sum(dim=(1, 2))  # (B,)
+            card  = (probs + targets_f).sum(dim=(1, 2))  # (B,)
+            dice  = (2 * inter + self.smooth) / (card + self.smooth)
+            return 1.0 - dice.mean()
 
-        # One-hot encode targets: (B, H, W) → (B, H, W, C) → (B, C, H, W)
-        one_hot = F.one_hot(targets, self.num_classes)  # (B, H, W, C)
-        one_hot = one_hot.permute(0, 3, 1, 2).float()  # (B, C, H, W)
+        else:
+            # ── Multi-class mode ──────────────────────────────
+            probs = F.softmax(preds, dim=1)              # (B, C, H, W)
 
-        # Zero out ignored pixels in both tensors
-        valid_4d = valid.unsqueeze(1).float()           # (B, 1, H, W)
-        probs    = probs    * valid_4d
-        one_hot  = one_hot  * valid_4d
+            # Build valid-pixel mask
+            valid   = (targets != self.ignore_index)     # (B, H, W) bool
+            targets_c = targets.clone().long()
+            targets_c[~valid] = 0
 
-        # Per-class Dice (sum over B, H, W dims → one value per class)
-        intersection = (probs * one_hot).sum(dim=(0, 2, 3))   # (C,)
-        cardinality  = (probs + one_hot).sum(dim=(0, 2, 3))   # (C,)
+            # One-hot encode: (B, H, W) → (B, C, H, W)
+            one_hot = F.one_hot(targets_c, self.num_classes)
+            one_hot = one_hot.permute(0, 3, 1, 2).float()
 
-        dice_per_class = (2 * intersection + self.smooth) / \
-                         (cardinality + self.smooth)
+            # Zero out ignored pixels
+            valid_4d = valid.unsqueeze(1).float()
+            probs    = probs    * valid_4d
+            one_hot  = one_hot  * valid_4d
 
-        return 1.0 - dice_per_class.mean()
+            # Per-class Dice
+            inter = (probs * one_hot).sum(dim=(0, 2, 3))  # (C,)
+            card  = (probs + one_hot).sum(dim=(0, 2, 3))  # (C,)
+            dice  = (2 * inter + self.smooth) / (card + self.smooth)
+            return 1.0 - dice.mean()
 
 
 # ─────────────────────────────────────────────────────────────
-# Hybrid Loss  (Focal + Dice)
+# Hybrid Loss (Focal + Dice) — primary training criterion
 # ─────────────────────────────────────────────────────────────
 class HybridLoss(nn.Module):
     """
     Weighted combination of Focal Loss and Dice Loss.
 
-    Using both losses together is a common best-practice in
-    medical and satellite image segmentation:
+    Both losses together are a best-practice for satellite segmentation:
         • Focal Loss → handles per-pixel class imbalance
-        • Dice Loss  → directly optimises segmentation overlap metric
+        • Dice Loss  → directly optimises overlap (IoU-related metric)
 
-    Default weights (focal=0.5, dice=0.5) are a good starting point.
-    You can tune these in CFG["FOCAL_WEIGHT"] / CFG["DICE_WEIGHT"].
+    Automatically adapts to multi-class or binary segmentation based
+    on num_classes (multi-class if > 1, binary if == 1).
+
+    Default weights (focal=0.5, dice=0.5) are a good starting point;
+    adjust via CFG["FOCAL_WEIGHT"] / CFG["DICE_WEIGHT"].
     """
 
     def __init__(self, num_classes: int = CFG["NUM_CLASSES"],
@@ -161,11 +207,11 @@ class HybridLoss(nn.Module):
                 targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            preds   : (B, C, H, W) — raw logits
-            targets : (B, H, W)    — integer class indices
+            preds   : (B, C, H, W) — raw logits.
+            targets : (B, H, W)    — ground-truth labels.
 
         Returns:
-            Scalar combined loss.
+            Scalar combined loss: focal_weight * Focal + dice_weight * Dice.
         """
         focal = self.focal(preds, targets)
         dice  = self.dice(preds, targets)
@@ -177,12 +223,26 @@ class HybridLoss(nn.Module):
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("losses.py — Running sanity check...")
+
+    # ── Multi-class (land_cover, 7 classes) ───────────────────
+    print("\n[Test 1] Multi-class HybridLoss (7 classes):")
     B, C, H, W = 2, 7, 512, 512
     preds   = torch.randn(B, C, H, W)
     targets = torch.randint(0, C, (B, H, W))
-
-    criterion = HybridLoss(num_classes=C)
-    loss      = criterion(preds, targets)
-    print(f"HybridLoss output: {loss.item():.4f}  (scalar)")
+    loss    = HybridLoss(num_classes=C)(preds, targets)
+    print(f"  HybridLoss output: {loss.item():.4f}  (scalar)")
     assert loss.ndim == 0, "Loss must be a scalar!"
-    print("Sanity check PASSED")
+    print("  PASSED [OK]")
+
+    # ── Binary (road, 1 class) ─────────────────────────────────
+    print("\n[Test 2] Binary HybridLoss (1 class, road):")
+    B, H, W = 2, 512, 512
+    preds   = torch.randn(B, 1, H, W)
+    targets = torch.randint(0, 2, (B, H, W)).float()
+    loss    = HybridLoss(num_classes=1)(preds, targets)
+    print(f"  HybridLoss output: {loss.item():.4f}  (scalar)")
+    assert loss.ndim == 0, "Loss must be a scalar!"
+    print("  PASSED [OK]")
+
+    print("\nAll sanity checks PASSED")
+

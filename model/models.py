@@ -1,11 +1,24 @@
 # =============================================================
-#  models.py — Model Architecture (Hybrid CNN + Transformer)
+#  models.py — SwinFAN Model Architecture
 #
-#  ★ YOU IMPLEMENT: CustomHybridEncoder.forward()
-#  ✓ PROVIDED:      UNetDecoder, SegmentationHead, HybridSegModel,
-#                   build_model()
+#  Implements the SwinFAN (Swin-based Focal Axial attention Network)
+#  hybrid encoder-decoder model for semantic segmentation.
 #
-#  Import with: from models import build_model
+#  Architecture:
+#    SwinEncoder → SwinFANDecoder (with AttentionGate at each level)
+#                → SegmentationHead → Logits
+#
+#  Encoders live in:  encoder/
+#  Decoders live in:  decoder/   (swinfan_decoder.py, unet_decoder.py)
+#
+#  Also retains the legacy HybridSegModel (ResNet-34 + TransformerBlock)
+#  for backward compatibility ("hybrid" arch setting in CFG).
+#
+#  Import with: from model.models import build_model
+#
+#  Project: DeepGlobe Land Cover & Road Segmentation
+#  Institution: SOICT, Hanoi University of Science and Technology
+#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import sys
@@ -17,98 +30,32 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from config import CFG
-from encoder.custom_encoder import CustomHybridEncoder
+from encoder.custom_encoder  import CustomHybridEncoder
+from encoder.swin_encoder    import SwinEncoder
+from decoder.swinfan_decoder import SwinFANDecoder
+from decoder.unet_decoder    import UNetDecoder
 
 
 # ─────────────────────────────────────────────────────────────
-# PROVIDED: U-Net Style Decoder
-# Takes skip connections from the encoder and upsamples them.
+# Decoder classes are defined in decoder/
+# (SwinFANDecoder, UNetDecoder — imported at top of file)
 # ─────────────────────────────────────────────────────────────
-class UNetDecoderBlock(nn.Module):
-    """Single upsampling step: upsample × 2 + concat skip + Conv."""
-
-    def __init__(self, in_channels: int, skip_channels: int, out_channels: int):
-        super().__init__()
-        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear",
-                                    align_corners=False)
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels + skip_channels, out_channels,
-                      kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels,
-                      kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-        )
-
-    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
-        x = self.upsample(x)
-        # Handle odd spatial sizes
-        if x.shape != skip.shape:
-            x = F.interpolate(x, size=skip.shape[2:],
-                              mode="bilinear", align_corners=False)
-        x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
-
-
-class UNetDecoder(nn.Module):
-    """
-    Standard U-Net Decoder with skip connections.
-
-    Receives the list of encoder features (multi-scale) and
-    progressively upsamples while merging skip connections until
-    the original image resolution is restored.
-
-    Args:
-        encoder_channels : List of channel counts from the encoder,
-                           ordered from HIGHEST to LOWEST resolution.
-                           e.g. [64, 64, 128, 256, 512] for ResNet-34.
-        decoder_channels : List of output channels per decoder stage.
-                           e.g. [256, 128, 64, 32]
-    """
-
-    def __init__(self, encoder_channels, decoder_channels=(256, 128, 64, 32)):
-        super().__init__()
-        # encoder_channels = [c0(high-res), c1, c2, c3, c4(bottleneck)]
-        # Decoder starts from bottleneck (c4) and fuses skip connections
-        # in reverse order: c3, c2, c1, c0.
-        in_chs   = encoder_channels[-1]     # bottleneck channels
-        skip_chs = list(reversed(encoder_channels[:-1]))  # [c3, c2, c1, c0]
-
-        self.blocks = nn.ModuleList()
-        for out_ch, skip_ch in zip(decoder_channels, skip_chs):
-            self.blocks.append(UNetDecoderBlock(in_chs, skip_ch, out_ch))
-            in_chs = out_ch
-
-        self.out_channels = decoder_channels[-1]
-
-    def forward(self, features):
-        """
-        Args:
-            features: List of encoder feature maps, ordered
-                      from high-res to low-res (bottleneck last).
-                      e.g. [f0(512), f1(256), f2(128), f3(64), bottleneck(64)]
-        Returns:
-            Tensor: Decoded feature map at ~original resolution.
-        """
-        # Start from the bottleneck
-        x     = features[-1]
-        skips = list(reversed(features[:-1]))   # [f3, f2, f1, f0]
-
-        for block, skip in zip(self.blocks, skips):
-            x = block(x, skip)
-
-        return x
 
 
 # ─────────────────────────────────────────────────────────────
-# PROVIDED: Final Segmentation Head
+# SHARED: Segmentation Head
 # ─────────────────────────────────────────────────────────────
 class SegmentationHead(nn.Module):
     """
-    1×1 convolution to map decoder features → class logits.
-    Then upsampled to match the input image size.
+    Final prediction head.
+
+    For multi-class (land_cover):
+        1×1 Conv maps features → num_classes logits.
+        Upsample to input resolution.
+
+    For binary (road):
+        num_classes=1, outputs a single channel logit map.
+        Apply sigmoid externally for probabilities.
     """
 
     def __init__(self, in_channels: int, num_classes: int):
@@ -123,17 +70,58 @@ class SegmentationHead(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────
-# PROVIDED: Full Segmentation Model
-# Wires Encoder → Decoder → Head together.
+# SwinFAN Model — Full End-to-End Model
 # ─────────────────────────────────────────────────────────────
-class HybridSegModel(nn.Module):
+class SwinFANModel(nn.Module):
     """
-    End-to-end segmentation model:
-        Input  → CustomHybridEncoder → UNetDecoder → SegmentationHead → Logits
+    SwinFAN: Swin-based Focal Axial attention Network for semantic segmentation.
 
-    You only need to implement CustomHybridEncoder.forward().
-    Everything else is wired up for you here.
+    Pipeline:
+        Input → SwinEncoder → SwinFANDecoder → SegmentationHead → Logits
+
+    Supports:
+        - Multi-class segmentation (land_cover, num_classes=7)
+        - Binary segmentation     (road,       num_classes=1)
+
+    Args:
+        encoder        : SwinEncoder instance.
+        num_classes    : Number of output classes (7 or 1).
+        decoder_channels : Channel progression of the decoder.
     """
+
+    def __init__(self, encoder: nn.Module, num_classes: int,
+                 decoder_channels=(384, 192, 96, 48, 24)):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = SwinFANDecoder(
+            encoder_channels=encoder.encoder_channels,
+            decoder_channels=decoder_channels,
+        )
+        self.head = SegmentationHead(
+            in_channels=self.decoder.out_channels,
+            num_classes=num_classes,
+        )
+        self.num_classes = num_classes
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x : Input batch (B, 3, H, W)
+
+        Returns:
+            logits : (B, num_classes, H, W) — raw unnormalised scores.
+                     • Multi-class: apply softmax / argmax for inference.
+                     • Binary:      apply sigmoid for probability.
+        """
+        target_size = x.shape[2:]           # (H, W) of the input patch
+        features    = self.encoder(x)       # list of 6 multi-scale tensors
+        decoded     = self.decoder(features)
+        logits      = self.head(decoded, target_size)
+        return logits
+
+
+class HybridSegModel(nn.Module):
+    """Legacy model: CustomHybridEncoder → UNetDecoder → SegmentationHead."""
 
     def __init__(self, encoder: nn.Module, num_classes: int,
                  decoder_channels=(256, 128, 64, 32)):
@@ -149,22 +137,15 @@ class HybridSegModel(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Input batch (B, 3, H, W)
-        Returns:
-            logits: (B, NUM_CLASSES, H, W) — raw unnormalised scores.
-                    Apply softmax (or argmax for inference).
-        """
-        target_size = x.shape[2:]           # (H, W) of input patch
-        features    = self.encoder(x)       # list of multi-scale tensors
+        target_size = x.shape[2:]
+        features    = self.encoder(x)
         decoded     = self.decoder(features)
         logits      = self.head(decoded, target_size)
         return logits
 
 
 # ─────────────────────────────────────────────────────────────
-# PROVIDED: Factory function called from train.py
+# Factory function — called from train.py
 # ─────────────────────────────────────────────────────────────
 def build_model(config: dict = CFG) -> nn.Module:
     """
@@ -173,35 +154,94 @@ def build_model(config: dict = CFG) -> nn.Module:
     Called in train.py:
         model = build_model(CFG).to(device)
 
+    Reads CFG["ARCH"] to select the architecture:
+        "swinfan" → SwinFANModel  (Swin-T encoder + attention-guided decoder)
+        "hybrid"  → HybridSegModel (ResNet-34 CNN encoder + standard UNetDecoder)
+
     Args:
-        config: CFG from config.py.
+        config : CFG dict from config.py.
 
     Returns:
-        HybridSegModel: Ready-to-train model.
+        nn.Module: Ready-to-train segmentation model.
     """
-    encoder = CustomHybridEncoder(in_channels=3, config=config)
+    arch        = config.get("ARCH", "swinfan").lower()
+    num_classes = config["NUM_CLASSES"]
 
-    model = HybridSegModel(
-        encoder=encoder,
-        num_classes=config["NUM_CLASSES"],
-        decoder_channels=(256, 128, 64, 32),
-    )
+    if arch == "swinfan":
+        encoder = SwinEncoder(in_channels=3, config=config)
+        model   = SwinFANModel(
+            encoder=encoder,
+            num_classes=num_classes,
+            decoder_channels=(384, 192, 96, 48, 24),
+        )
+        label = "SwinFANModel"
+    else:
+        encoder = CustomHybridEncoder(in_channels=3, config=config)
+        model   = HybridSegModel(
+            encoder=encoder,
+            num_classes=num_classes,
+            decoder_channels=(256, 128, 64, 32),
+        )
+        label = "HybridSegModel (legacy)"
 
     total = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[models] HybridSegModel | Trainable params: {total:,}")
+    print(f"[models] {label} | Task: {config.get('TASK')} "
+          f"| Classes: {num_classes} | Trainable params: {total:,}")
     return model
 
 
 # ─────────────────────────────────────────────────────────────
-# Quick test — run `python models.py` after implementing encoder
+# Quick test — run `python model/models.py`
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("models.py — Running shape test...")
-    model  = build_model(CFG)
-    dummy  = torch.randn(2, 3, 512, 512)
+    import copy
+
+    print("=" * 60)
+    print("  models.py — SwinFAN Architecture Shape Test")
+    print("=" * 60)
+
+    dummy = torch.randn(2, 3, 512, 512)
+
+    # ── Test 1: SwinFAN — Land Cover (7 classes) ──────────────
+    print("\n[Test 1] SwinFAN — land_cover (7 classes)")
+    cfg_lc = copy.deepcopy(CFG)
+    cfg_lc["ARCH"]        = "swinfan"
+    cfg_lc["TASK"]        = "land_cover"
+    cfg_lc["NUM_CLASSES"] = 7
+    model  = build_model(cfg_lc)
     output = model(dummy)
-    print(f"Input:  {dummy.shape}")
-    print(f"Output: {output.shape}")
-    assert output.shape == (2, CFG["NUM_CLASSES"], 512, 512), \
-        f"Shape mismatch! Expected (2, {CFG['NUM_CLASSES']}, 512, 512)"
-    print("Shape test PASSED")
+    print(f"  Input:  {tuple(dummy.shape)}")
+    print(f"  Output: {tuple(output.shape)}")
+    assert output.shape == (2, 7, 512, 512), f"Shape mismatch! Got {output.shape}"
+    print("  PASSED [OK]")
+
+    # ── Test 2: SwinFAN — Road (binary, 1 class) ──────────────
+    print("\n[Test 2] SwinFAN — road (1 class binary)")
+    cfg_road = copy.deepcopy(CFG)
+    cfg_road["ARCH"]        = "swinfan"
+    cfg_road["TASK"]        = "road"
+    cfg_road["NUM_CLASSES"] = 1
+    model  = build_model(cfg_road)
+    output = model(dummy)
+    print(f"  Input:  {tuple(dummy.shape)}")
+    print(f"  Output: {tuple(output.shape)}")
+    assert output.shape == (2, 1, 512, 512), f"Shape mismatch! Got {output.shape}"
+    print("  PASSED [OK]")
+
+    # ── Test 3: Legacy Hybrid model ───────────────────────────
+    print("\n[Test 3] Legacy HybridSegModel — land_cover (7 classes)")
+    cfg_hyb = copy.deepcopy(CFG)
+    cfg_hyb["ARCH"]        = "hybrid"
+    cfg_hyb["TASK"]        = "land_cover"
+    cfg_hyb["NUM_CLASSES"] = 7
+    model  = build_model(cfg_hyb)
+    output = model(dummy)
+    print(f"  Input:  {tuple(dummy.shape)}")
+    print(f"  Output: {tuple(output.shape)}")
+    assert output.shape == (2, 7, 512, 512), f"Shape mismatch! Got {output.shape}"
+    print("  PASSED [OK]")
+
+    print("\n" + "=" * 60)
+    print("  All shape tests PASSED")
+    print("=" * 60)
+

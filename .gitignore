@@ -1,7 +1,14 @@
 # Data & Outputs
-data/
 output/
 dataloader/images/
+
+# Ignore all files inside train, valid, test splits but keep the folders via .gitkeep
+data/train/*
+!data/train/.gitkeep
+data/valid/*
+!data/valid/.gitkeep
+data/test/*
+!data/test/.gitkeep
 
 # Python cache
 __pycache__/
