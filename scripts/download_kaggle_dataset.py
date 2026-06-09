@@ -4,13 +4,13 @@
 #  Uses kagglehub (no manual kaggle CLI setup needed).
 #  Copies train/, valid/, test/ folders into the project's data/ directory.
 #
-#  Run with: python download_kaggle_dataset.py
+#  Run with: python scripts/download_kaggle_dataset.py
 # =============================================================
 import shutil
 from pathlib import Path
 import kagglehub
 # ── Where to put the data in this project ────────────────────
-DEST = Path(__file__).parent / "data"
+DEST = Path(__file__).resolve().parents[1] / "data"
 # ── Splits to copy ───────────────────────────────────────────
 SPLITS = ["train", "valid", "test"]
 # ── Download via kagglehub ────────────────────────────────────

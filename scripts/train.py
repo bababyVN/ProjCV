@@ -1,7 +1,7 @@
-﻿# =============================================================
+# =============================================================
 #  train.py — Training & Validation Loop
 #
-#  Run with: python train.py
+#  Run with: python scripts/train.py
 #
 #  Supports two tasks (configure via config.py):
 #    • "land_cover" — 7-class multi-class segmentation
@@ -25,6 +25,10 @@
 #  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
 import contextlib
 import os
 import random
@@ -32,7 +36,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
-from pathlib import Path
 
 from config import CFG
 from dataloader.dataset import build_dataframe, split_dataframe, get_dataloaders
@@ -109,9 +112,9 @@ def train_one_epoch(model:     nn.Module,
     Run one full training epoch over all batches.
 
     Mixed-Precision (FP16) Training:
-        • `_autocast(device)` — on CUDA casts ops to float16 for speed.
-        • `GradScaler`        — prevents float16 underflow; no-op on CPU.
-        • `clip_grad_norm_`   — clips gradients for Transformer stability.
+        • _autocast(device) — on CUDA casts ops to float16 for speed.
+        • GradScaler        — prevents float16 underflow; no-op on CPU.
+        • clip_grad_norm_   — clips gradients for Transformer stability.
 
     Returns:
         float: Mean training loss for the epoch.
@@ -324,4 +327,3 @@ def main():
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     model, history = main()
-
