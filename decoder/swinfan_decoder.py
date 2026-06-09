@@ -7,10 +7,6 @@
 #    SwinFANDecoder        — full multi-scale decoder
 #
 #  Used by SwinFANModel in model/models.py.
-#
-#  Project: DeepGlobe Land Cover & Road Segmentation
-#  Institution: SOICT, Hanoi University of Science and Technology
-#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import torch

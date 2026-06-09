@@ -1,31 +1,24 @@
 # =============================================================
 #  preprocessing_showcase.py
-#  Trực quan hoá toàn bộ pipeline Tiền xử lý ảnh
-#  Lý thuyết xử lý ảnh cổ điển + DataLoader học sâu (DL)
-#
-#  SOICT – Nhóm 24 | Giảng viên: TS. Trần Nguyên Ngọc
-#  Lê Hoàng Nam · Ngô Nguyên Ngọc · Nguyễn Trung Hải
-#  Phan Hải Nguyên · Lê Quang Huy
-#
-#  Chạy từ thư mục gốc dự án:
-#      python dataloader/preprocessing_showcase.py
 #
 #  Output:
 #      dataloader/images/preprocessing_intensity_filters.png
 #      dataloader/images/preprocessing_edges_augmentations.png
 #      dataloader/images/preprocessing_labels.png
 #
-#  * LƯU Ý HỌC THUẬT:
-#    Các phương pháp cổ điển (Cường độ, Bộ lọc, Biên cạnh) trong file này CHỈ dùng để
-#    trực quan hoá lý thuyết và phân tích dữ liệu (EDA), KHÔNG được áp dụng
-#    vào pipeline huấn luyện chính (dataloader.py).
-#    - Xử lý tương phản: Không dùng HE/CLAHE vì dễ gây nhiễu màu sắc phổ
-#      ảnh vệ tinh. Thay vào đó dùng chuẩn hoá Z-score (ImageNet Normalization).
-#    - Bộ lọc không gian: Lọc mịn làm mờ các chi tiết ranh giới nhỏ (đường sá,
-#      viền đất) vốn cực kỳ quan trọng cho mô hình Segmentation.
-#    - Tìm cạnh biên: Để mô hình SwinFAN tự học bộ lọc cạnh thông qua
-#      quá trình End-to-End training; việc nạp trực tiếp ảnh cạnh làm mất
-#      thông tin màu sắc và kết cấu quan trọng.
+# The classical methods (Intensity, Filters, Edges) in this file are ONLY for
+# theoretical visualization and data analysis (EDA), and should NOT be applied
+# to the main training pipeline (dataloader.py).
+#
+# - Contrast processing: Do not use HE/CLAHE as it easily causes color noise in the spectrum of
+# satellite images. Instead, use Z-score normalization (ImageNet Normalization).
+#
+# - Spatial filters: Fine filters blur small boundary details (roads,
+# land borders) which are extremely important for the Segmentation model.
+#
+# - Edge finding: Let the SwinFAN model learn edge filters through
+# end-to-end training; directly loading edge images loses
+# important color and texture information.
 # =============================================================
 
 import sys

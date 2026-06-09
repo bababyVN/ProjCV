@@ -8,10 +8,6 @@
 #  HybridLoss = FocalLoss + DiceLoss (weighted combination)
 #
 #  Import with: from helper.losses import HybridLoss
-#
-#  Project: DeepGlobe Land Cover & Road Segmentation
-#  Institution: SOICT, Hanoi University of Science and Technology
-#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import sys

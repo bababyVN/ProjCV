@@ -1,8 +1,7 @@
 # =============================================================
 #  dataset_eda.py — Dataset Exploratory Data Analysis & Visualisation
 #
-#  Performs deep visual analysis on the DeepGlobe dataset as requested
-#  by your CV course curriculum:
+#  Performs visual analysis:
 #    1. Color distribution (RGB histograms with channel-wise means/stds)
 #    2. Contrast level analysis (Grayscale intensity histogram, RMS contrast distribution, high/low contrast labeling)
 #    3. Class pixel distribution (percentage bar chart colored by category)

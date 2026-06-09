@@ -12,10 +12,6 @@
 #    - Binary segmentation      (road,       NUM_CLASSES=1)
 #
 #  Import with: from helper.metrics import SegmentationMetrics
-#
-#  Project: DeepGlobe Land Cover & Road Segmentation
-#  Institution: SOICT, Hanoi University of Science and Technology
-#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import sys

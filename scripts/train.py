@@ -19,10 +19,6 @@
 #      model/models.py           — SwinFANModel, build_model
 #      helper/losses.py          — HybridLoss (Focal + Dice)
 #      helper/metrics.py         — SegmentationMetrics (IoU, Acc, F1)
-#
-#  Project: DeepGlobe Land Cover & Road Segmentation
-#  Institution: SOICT, Hanoi University of Science and Technology
-#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
 # =============================================================
 
 import sys
@@ -213,8 +209,7 @@ def main():
     arch_label = CFG.get("ARCH", "swinfan").upper()
 
     print("=" * 60)
-    print(f"  DeepGlobe Segmentation — {arch_label}")
-    print(f"  SOICT Group 24 | Supervisor: Dr. Tran Nguyen Ngoc")
+    print(f" Segmentation — {arch_label}")
     print("=" * 60)
     print(f"  Device     : {device}")
     if device == "cuda":
