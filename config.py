@@ -2,16 +2,6 @@
 #  config.py — Global Configuration
 #  All hyperparameters and constants live here.
 #  Import with: from config import CFG, LC_CLASSES, LC_COLOR_TO_CLASS
-#
-#  Project: DeepGlobe Land Cover & Road Segmentation
-#  Institution: SOICT, Hanoi University of Science and Technology
-#  Group: 24 | Supervisor: Dr. Tran Nguyen Ngoc
-#  Members:
-#    Lê Hoàng Nam      - 20235536
-#    Ngô Nguyên Ngọc   - 20235538
-#    Nguyễn Trung Hải  - 20235495
-#    Phan Hải Nguyên   - 20235540
-#    Lê Quang Huy      - 20235503
 # =============================================================
 
 import torch
