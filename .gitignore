@@ -1,6 +1,6 @@
 # Data & Outputs
 output/
-dataloader/images/
+# dataloader/images/
 
 # Ignore all files inside train, valid, test splits but keep the folders via .gitkeep
 data/train/*
