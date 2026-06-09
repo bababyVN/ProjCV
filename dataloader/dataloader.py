@@ -1,8 +1,8 @@
 # =============================================================
-#  dataset.py — Dataset & DataLoader
+#  dataloader.py — Dataset & DataLoader
 #
 #  Fully implemented for DeepGlobe Land Cover / Road Extraction.
-#  Import with: from dataloader.dataset import DeepGlobeDataset, get_dataloaders
+#  Import with: from dataloader.dataloader import DeepGlobeDataset, get_dataloaders
 # =============================================================
 
 import os
@@ -443,10 +443,10 @@ def get_dataloaders(train_df: pd.DataFrame,
 
 
 # ─────────────────────────────────────────────────────────────
-# Quick sanity check — run `python -m dataloader.dataset` to test
+# Quick sanity check — run `python -m dataloader.dataloader` to test
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("dataset.py — Running sanity check...")
+    print("dataloader.py — Running sanity check...")
     df               = build_dataframe(CFG["DATA_ROOT"])
     train_df, val_df = split_dataframe(df)
     print(f"Total samples: {len(df)}")

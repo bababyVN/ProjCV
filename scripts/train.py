@@ -14,7 +14,7 @@
 #
 #  Project structure:
 #      config.py                 — hyperparameters & class maps
-#      dataloader/dataset.py     — DeepGlobeDataset, get_dataloaders
+#      dataloader/dataloader.py  — DeepGlobeDataset, get_dataloaders
 #      encoder/swin_encoder.py   — SwinFAN Swin-T backbone
 #      model/models.py           — SwinFANModel, build_model
 #      helper/losses.py          — HybridLoss (Focal + Dice)
@@ -38,7 +38,7 @@ import torch.nn as nn
 from tqdm.auto import tqdm
 
 from config import CFG
-from dataloader.dataset import build_dataframe, split_dataframe, get_dataloaders
+from dataloader.dataloader import build_dataframe, split_dataframe, get_dataloaders
 from model.models        import build_model
 from helper.losses       import HybridLoss
 from helper.metrics      import SegmentationMetrics

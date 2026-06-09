@@ -33,7 +33,7 @@ import matplotlib.gridspec as gridspec
 from tqdm import tqdm
 
 from config import CFG, LC_CLASSES, LC_COLOR_TO_CLASS
-from dataloader.dataset import build_dataframe
+from dataloader.dataloader import build_dataframe
 
 def analyze_dataset(df: pd.DataFrame, max_samples: int = 100):
     """

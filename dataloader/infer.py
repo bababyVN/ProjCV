@@ -23,7 +23,7 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 from config import CFG, LC_CLASSES, IMAGENET_MEAN, IMAGENET_STD
-from dataloader.dataset import rgb_mask_to_index, index_to_rgb, build_dataframe, split_dataframe
+from dataloader.dataloader import rgb_mask_to_index, index_to_rgb, build_dataframe, split_dataframe
 from model.models  import build_model
 
 

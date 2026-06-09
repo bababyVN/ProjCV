@@ -31,7 +31,7 @@ import matplotlib.gridspec as gridspec
 import torch
 
 from config import CFG, LC_CLASSES, IMAGENET_MEAN, IMAGENET_STD
-from dataloader.dataset import (
+from dataloader.dataloader import (
     DeepGlobeDataset,
     build_dataframe,
     split_dataframe,

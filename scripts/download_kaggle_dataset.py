@@ -45,4 +45,4 @@ for split in SPLITS:
     mask_count = len(list(split_dest.glob("*_mask.png")))
     print(f"  Verified — *_sat.jpg: {sat_count}  |  *_mask.png: {mask_count}")
 print(f"\nAll done! Dataset ready at: {DEST}")
-print("You can now run: python -m dataloader.dataset")
+print("You can now run: python -m dataloader.dataloader")

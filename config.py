@@ -104,13 +104,13 @@ LC_CLASSES = {
 }
 
 # Reverse lookup: RGB tuple → class index
-# Used in dataset.py when converting mask images to index maps.
+# Used in dataloader.py when converting mask images to index maps.
 LC_COLOR_TO_CLASS = {color: idx for idx, (_, color) in LC_CLASSES.items()}
 
 
 # ─────────────────────────────────────────────────────────────
 # ImageNet normalisation constants
-# Used in dataset.py augmentation pipelines.
+# Used in dataloader.py augmentation pipelines.
 # ─────────────────────────────────────────────────────────────
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD  = (0.229, 0.224, 0.225)
