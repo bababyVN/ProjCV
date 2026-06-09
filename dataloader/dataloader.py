@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -222,6 +222,17 @@ class DeepGlobeDataset(Dataset):
             image = self._load_image(row["image_path"])   # (H, W, 3) uint8 RGB
             H, W  = image.shape[:2]
 
+            # Load full mask once outside the loop to avoid redundant disk reads during retries
+            if self.task == "land_cover":
+                mask_full = cv2.imread(row["mask_path"])
+                if mask_full is None:
+                    raise FileNotFoundError(f"[dataset] Cannot load mask: {row['mask_path']}")
+                mask_full = cv2.cvtColor(mask_full, cv2.COLOR_BGR2RGB)
+            else:
+                mask_full = cv2.imread(row["mask_path"], cv2.IMREAD_GRAYSCALE)
+                if mask_full is None:
+                    raise FileNotFoundError(f"[dataset] Cannot load mask: {row['mask_path']}")
+
             # ── Online Patch Sampling with retry ──────────────
             # Retry loop: try to find a patch with at least some labelled
             # pixels. For land_cover we skip fully-"Unknown" (black) patches.
@@ -231,11 +242,9 @@ class DeepGlobeDataset(Dataset):
 
                 img_crop  = image[y:y+ps, x:x+ps]           # (ps, ps, 3)
 
-                # For land_cover: load raw mask crop and check for signal
+                # For land_cover: check for signal on preloaded mask
                 if self.task == "land_cover":
-                    mask_rgb  = cv2.imread(row["mask_path"])
-                    mask_rgb  = cv2.cvtColor(mask_rgb, cv2.COLOR_BGR2RGB)
-                    mask_crop = mask_rgb[y:y+ps, x:x+ps]    # (ps, ps, 3)
+                    mask_crop = mask_full[y:y+ps, x:x+ps]    # (ps, ps, 3)
 
                     # Skip if the entire crop is the "Unknown" black colour
                     is_all_unknown = np.all(mask_crop == np.array([0, 0, 0],
@@ -246,9 +255,8 @@ class DeepGlobeDataset(Dataset):
                     # ── Convert crop to index map (AFTER cropping = 23× faster) ──
                     mask_index = rgb_mask_to_index(mask_crop)  # (ps, ps) int64
                 else:
-                    # road task: grayscale binary mask
-                    mask_gray = cv2.imread(row["mask_path"], cv2.IMREAD_GRAYSCALE)
-                    mask_crop = mask_gray[y:y+ps, x:x+ps]
+                    # road task: grayscale binary mask crop
+                    mask_crop = mask_full[y:y+ps, x:x+ps]
                     mask_index = (mask_crop > 127).astype(np.float32)  # (ps, ps)
 
                 break  # acceptable patch found
