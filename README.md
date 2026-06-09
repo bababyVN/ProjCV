@@ -1,6 +1,6 @@
-# DeepGlobe Semantic Segmentation: SwinFAN & Hybrid Models
+# DeepGlobe Semantic Segmentation: SwinFAN Hybrid Models
 
-This repository contains a PyTorch implementation of semantic segmentation models for earth observation tasks based on the DeepGlobe dataset. It features the **SwinFAN** architecture (Swin Transformer Encoder + Attention-Guided Decoder) and a legacy **Hybrid CNN-Transformer** model.
+This repository contains a PyTorch implementation of semantic segmentation models for earth observation tasks based on the DeepGlobe dataset. It features the **SwinFAN** architecture (Swin Transformer Encoder + Attention-Guided Decoder).
 
 It supports two main tasks:
 1. **Land Cover Classification**: 7-class multi-label semantic segmentation (DeepGlobe Land Cover).
