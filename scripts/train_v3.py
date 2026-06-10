@@ -2,8 +2,6 @@
 #  train_v3.py — SwinFAN-v3 Training & Validation Loop
 #
 #  Run with: python scripts/train_v3.py
-#
-#  Differences from train_v2.py (SwinFAN-v2):
 #    • ARCH = "swinfan_v3" — Swin-v2-Base backbone with
 #      SatlasPretrain Aerial pretraining (ICCV 2023, Apache-2.0)
 #    • Backbone pretrained on 302M remote sensing labels
@@ -12,15 +10,9 @@
 #      HuggingFace and caches to /kaggle/working/weights/
 #    • Checkpoint saved to output/best_model_v3.pth
 #    • SwinFAN-v2 checkpoint (best_model_v2.pth) is NOT touched
-#
-#  Same as v2 in all other respects:
 #    • BATCH_SIZE = 4 + GRAD_ACCUM = 2 (effective batch 8)
 #    • Loss = SwinFANv2Loss (Focal 30% + Dice 30% + Lovász 40%)
 #    • LR = 3e-4, EPOCHS = 50, CosineAnnealingLR
-#
-#  Expected improvement over SwinFAN-v2:
-#    +3–5% mIoU (6-class) from remote sensing pretraining
-#    Predicted range: 0.65–0.72 (6-class mIoU on DeepGlobe)
 #
 #  Project structure:
 #      config.py                 — base hyperparameters & class maps
