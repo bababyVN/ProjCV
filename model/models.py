@@ -27,7 +27,7 @@ import torch.nn.functional as F
 
 from config import CFG
 from encoder.custom_encoder  import CustomHybridEncoder
-from encoder.swin_encoder    import SwinEncoder
+from encoder.swin_encoder    import SwinEncoder, SwinBaseEncoder, SwinV2BaseEncoder
 from decoder.swinfan_decoder import SwinFANDecoder
 from decoder.unet_decoder    import UNetDecoder
 
@@ -151,8 +151,10 @@ def build_model(config: dict = CFG) -> nn.Module:
         model = build_model(CFG).to(device)
 
     Reads CFG["ARCH"] to select the architecture:
-        "swinfan" → SwinFANModel  (Swin-T encoder + attention-guided decoder)
-        "hybrid"  → HybridSegModel (ResNet-34 CNN encoder + standard UNetDecoder)
+        "swinfan"    → SwinFANModel  (Swin-T encoder + attention-guided decoder)
+        "swinfan_v2" → SwinFANModel  (Swin-B encoder, ImageNet-1K pretrain)
+        "swinfan_v3" → SwinFANModel  (Swin-v2-B encoder, SatlasPretrain aerial)
+        "hybrid"     → HybridSegModel (ResNet-34 CNN encoder + standard UNetDecoder)
 
     Args:
         config : CFG dict from config.py.
@@ -164,14 +166,43 @@ def build_model(config: dict = CFG) -> nn.Module:
     num_classes = config["NUM_CLASSES"]
 
     if arch == "swinfan":
+        # ── SwinFAN-v1: Swin-T (28M params) + Attention-Guided Decoder ──────
         encoder = SwinEncoder(in_channels=3, config=config)
         model   = SwinFANModel(
             encoder=encoder,
             num_classes=num_classes,
             decoder_channels=(384, 192, 96, 48, 24),
         )
-        label = "SwinFANModel"
+        label = "SwinFANModel (v1 — Swin-T)"
+
+    elif arch == "swinfan_v2":
+        # ── SwinFAN-v2: Swin-B (88M params) + Wider Attention-Guided Decoder ─
+        # Swin-B encoder channels: [3, 48, 128, 256, 512, 1024]
+        # Decoder channels scaled up to match wider encoder skips.
+        encoder = SwinBaseEncoder(in_channels=3, config=config)
+        model   = SwinFANModel(
+            encoder=encoder,
+            num_classes=num_classes,
+            decoder_channels=(512, 256, 128, 64, 32),
+        )
+        label = "SwinFANModel (v2 — Swin-B, ImageNet-1K)"
+
+    elif arch == "swinfan_v3":
+        # ── SwinFAN-v3: Swin-v2-B + SatlasPretrain Aerial Weights ────────────
+        # Uses SwinV2BaseEncoder which downloads aerial_swinb_si.pth (~503 MB)
+        # from HuggingFace on first run and caches it locally.
+        # Encoder channels: [3, 48, 128, 256, 512, 1024] — identical to v2.
+        # Decoder channels unchanged from v2.
+        encoder = SwinV2BaseEncoder(in_channels=3, config=config)
+        model   = SwinFANModel(
+            encoder=encoder,
+            num_classes=num_classes,
+            decoder_channels=(512, 256, 128, 64, 32),
+        )
+        label = "SwinFANModel (v3 — Swin-v2-B, SatlasPretrain Aerial)"
+
     else:
+        # ── Legacy Hybrid: ResNet-34 CNN + Transformer + UNetDecoder ─────────
         encoder = CustomHybridEncoder(in_channels=3, config=config)
         model   = HybridSegModel(
             encoder=encoder,
@@ -198,8 +229,8 @@ if __name__ == "__main__":
 
     dummy = torch.randn(2, 3, 512, 512)
 
-    # ── Test 1: SwinFAN — Land Cover (7 classes) ──────────────
-    print("\n[Test 1] SwinFAN — land_cover (7 classes)")
+    # ── Test 1: SwinFAN-v1 — Land Cover (7 classes) ───────────
+    print("\n[Test 1] SwinFAN-v1 (Swin-T) — land_cover (7 classes)")
     cfg_lc = copy.deepcopy(CFG)
     cfg_lc["ARCH"]        = "swinfan"
     cfg_lc["TASK"]        = "land_cover"
@@ -211,8 +242,8 @@ if __name__ == "__main__":
     assert output.shape == (2, 7, 512, 512), f"Shape mismatch! Got {output.shape}"
     print("  PASSED [OK]")
 
-    # ── Test 2: SwinFAN — Road (binary, 1 class) ──────────────
-    print("\n[Test 2] SwinFAN — road (1 class binary)")
+    # ── Test 2: SwinFAN-v1 — Road (binary, 1 class) ───────────
+    print("\n[Test 2] SwinFAN-v1 (Swin-T) — road (1 class binary)")
     cfg_road = copy.deepcopy(CFG)
     cfg_road["ARCH"]        = "swinfan"
     cfg_road["TASK"]        = "road"
@@ -224,8 +255,40 @@ if __name__ == "__main__":
     assert output.shape == (2, 1, 512, 512), f"Shape mismatch! Got {output.shape}"
     print("  PASSED [OK]")
 
-    # ── Test 3: Legacy Hybrid model ───────────────────────────
-    print("\n[Test 3] Legacy HybridSegModel — land_cover (7 classes)")
+    # ── Test 3: SwinFAN-v2 — Land Cover (7 classes) ───────────
+    print("\n[Test 3] SwinFAN-v2 (Swin-B) — land_cover (7 classes)")
+    cfg_v2 = copy.deepcopy(CFG)
+    cfg_v2["ARCH"]        = "swinfan_v2"
+    cfg_v2["TASK"]        = "land_cover"
+    cfg_v2["NUM_CLASSES"] = 7
+    model  = build_model(cfg_v2)
+    output = model(dummy)
+    print(f"  Input:  {tuple(dummy.shape)}")
+    print(f"  Output: {tuple(output.shape)}")
+    assert output.shape == (2, 7, 512, 512), f"Shape mismatch! Got {output.shape}"
+    print("  PASSED [OK]")
+
+    # ── Test 4: SwinFAN-v3 shape test (no download — random init) ────────────
+    # We test v3 with a monkeypatched _load_satlas_weights that does nothing,
+    # so no 503 MB download is triggered during local shape testing.
+    print("\n[Test 4] SwinFAN-v3 (Swin-v2-B, no download) — land_cover (7 classes)")
+    from encoder.swin_encoder import SwinV2BaseEncoder as _V3Enc
+    _orig_load = _V3Enc._load_satlas_weights
+    _V3Enc._load_satlas_weights = lambda self, bb: None   # skip download
+    cfg_v3 = copy.deepcopy(CFG)
+    cfg_v3["ARCH"]        = "swinfan_v3"
+    cfg_v3["TASK"]        = "land_cover"
+    cfg_v3["NUM_CLASSES"] = 7
+    model  = build_model(cfg_v3)
+    output = model(dummy)
+    print(f"  Input:  {tuple(dummy.shape)}")
+    print(f"  Output: {tuple(output.shape)}")
+    assert output.shape == (2, 7, 512, 512), f"Shape mismatch! Got {output.shape}"
+    print("  PASSED [OK]")
+    _V3Enc._load_satlas_weights = _orig_load   # restore
+
+    # ── Test 5: Legacy Hybrid model ───────────────────────────
+    print("\n[Test 5] Legacy HybridSegModel — land_cover (7 classes)")
     cfg_hyb = copy.deepcopy(CFG)
     cfg_hyb["ARCH"]        = "hybrid"
     cfg_hyb["TASK"]        = "land_cover"

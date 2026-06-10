@@ -215,6 +215,204 @@ class HybridLoss(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────
+# Lovász-Softmax Loss (multi-class)
+# A surrogate loss that directly optimises the Jaccard/IoU index
+# via the Lovász extension. Particularly effective for imbalanced
+# segmentation tasks.
+#
+# Reference: Berman et al. "The Lovász-Softmax Loss: A Tractable
+#            Surrogate for the Optimization of the Intersection-
+#            over-Union Measure in Neural Networks" (CVPR 2018).
+# ─────────────────────────────────────────────────────────────
+def _lovasz_grad(gt_sorted: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the Lovász extension of the set function.
+
+    Args:
+        gt_sorted : (P,) — binary ground-truth labels sorted in
+                    descending order of predicted error.
+
+    Returns:
+        (P,) — gradient of the Lovász extension at each position.
+    """
+    p = len(gt_sorted)
+    gts = gt_sorted.sum()
+    intersection = gts - gt_sorted.float().cumsum(0)
+    union = gts + (1 - gt_sorted).float().cumsum(0)
+    jaccard = 1.0 - intersection / union
+    if p > 1:
+        jaccard[1:p] = jaccard[1:p] - jaccard[0:(p - 1)]
+    return jaccard
+
+
+class LovaszSoftmaxLoss(nn.Module):
+    """
+    Multi-class Lovász-Softmax Loss.
+
+    Directly optimises the mean per-class Intersection-over-Union
+    (Jaccard index) by computing the continuous Lovász extension of
+    the discrete 0-1 IoU loss and applying it to the softmax output.
+
+    Unlike Dice loss (which optimises F1), this loss more directly
+    corresponds to mIoU and tends to produce tighter boundaries.
+
+    Args:
+        classes      : Which classes to include in the mean.
+                       ``"all"`` (default) averages all classes;
+                       ``"present"`` averages only classes with
+                       at least one ground-truth pixel.
+        ignore_index : Pixels with this label are excluded.
+        smooth       : Smoothing factor for the error computation.
+    """
+
+    def __init__(self, classes: str = "present",
+                 ignore_index: int = 255,
+                 smooth: float = 0.0):
+        super().__init__()
+        assert classes in ("all", "present"), \
+            "classes must be 'all' or 'present'"
+        self.classes      = classes
+        self.ignore_index = ignore_index
+        self.smooth       = smooth
+
+    def forward(self, preds: torch.Tensor,
+                targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            preds   : (B, C, H, W) — raw logits.
+            targets : (B, H, W)    — integer class indices.
+
+        Returns:
+            Scalar Lovász-Softmax loss.
+        """
+        num_classes = preds.shape[1]
+        probs = F.softmax(preds, dim=1)   # (B, C, H, W)
+
+        B, C, H, W = probs.shape
+
+        # Flatten spatial dimensions
+        probs   = probs.view(B, C, -1)    # (B, C, P)
+        targets = targets.view(B, -1)     # (B, P)
+
+        losses = []
+        for b in range(B):
+            t = targets[b]                # (P,)
+            p = probs[b]                  # (C, P)
+
+            # Remove ignored pixels
+            valid = t != self.ignore_index
+            t = t[valid]
+            p = p[:, valid]
+
+            if t.numel() == 0:
+                continue
+
+            losses.append(self._lovasz_softmax_flat(p, t, num_classes))
+
+        if not losses:
+            return preds.sum() * 0.0     # degenerate case — return 0
+
+        return torch.stack(losses).mean()
+
+    def _lovasz_softmax_flat(self, probs: torch.Tensor,
+                              labels: torch.Tensor,
+                              num_classes: int) -> torch.Tensor:
+        """
+        Compute Lovász-Softmax for a single (flattened) image.
+
+        Args:
+            probs  : (C, P) — softmax probabilities.
+            labels : (P,)   — integer class indices.
+
+        Returns:
+            Scalar loss.
+        """
+        class_losses = []
+        for c in range(num_classes):
+            # Skip classes absent from GT if classes == "present"
+            fg = (labels == c).float()   # binary: 1 where class c
+            if self.classes == "present" and fg.sum() == 0:
+                continue
+
+            # Error: probability assigned to wrong class
+            errors = (fg - probs[c]).abs()
+            # Sort pixels by descending error
+            errors_sorted, perm = torch.sort(errors, descending=True)
+            fg_sorted = fg[perm]
+            grad = _lovasz_grad(fg_sorted)
+            class_losses.append(
+                torch.dot(errors_sorted, grad.to(errors_sorted.device))
+            )
+
+        if not class_losses:
+            return probs.sum() * 0.0
+
+        return torch.stack(class_losses).mean()
+
+
+# ─────────────────────────────────────────────────────────────
+# SwinFANv2Loss  (Focal + Dice + Lovász)
+# Combines all three loss components for maximum segmentation
+# performance in SwinFAN-v2 training.
+# ─────────────────────────────────────────────────────────────
+class SwinFANv2Loss(nn.Module):
+    """
+    Composite loss for SwinFAN-v2 training.
+
+    Weighted combination of three complementary losses:
+        • Focal Loss    — handles per-pixel class imbalance
+        • Dice Loss     — optimises F1 / overlap
+        • Lovász Loss   — directly optimises mIoU (Jaccard index)
+
+    Designed for multi-class satellite image segmentation.
+    Supports ignoring the noisy "Unknown" (class 6) class.
+
+    Args:
+        num_classes   : Number of segmentation classes.
+        focal_weight  : Weight for the Focal Loss component.
+        dice_weight   : Weight for the Dice Loss component.
+        lovasz_weight : Weight for the Lovász-Softmax component.
+        focal_gamma   : Focusing parameter for Focal Loss.
+        focal_alpha   : Alpha for Focal Loss.
+        ignore_index  : Pixels with this label are excluded.
+    """
+
+    def __init__(self,
+                 num_classes:   int   = 7,
+                 focal_weight:  float = 0.3,
+                 dice_weight:   float = 0.3,
+                 lovasz_weight: float = 0.4,
+                 focal_gamma:   float = 2.0,
+                 focal_alpha:   float = 0.25,
+                 ignore_index:  int   = 255):
+        super().__init__()
+        self.focal  = FocalLoss(gamma=focal_gamma, alpha=focal_alpha,
+                                ignore_index=ignore_index)
+        self.dice   = DiceLoss(num_classes=num_classes,
+                               ignore_index=ignore_index)
+        self.lovasz = LovaszSoftmaxLoss(classes="present",
+                                        ignore_index=ignore_index)
+        self.fw = focal_weight
+        self.dw = dice_weight
+        self.lw = lovasz_weight
+
+    def forward(self, preds: torch.Tensor,
+                targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            preds   : (B, C, H, W) — raw logits.
+            targets : (B, H, W)    — ground-truth labels.
+
+        Returns:
+            Scalar combined loss.
+        """
+        focal  = self.focal(preds, targets)
+        dice   = self.dice(preds, targets)
+        lovasz = self.lovasz(preds, targets)
+        return self.fw * focal + self.dw * dice + self.lw * lovasz
+
+
+# ─────────────────────────────────────────────────────────────
 # Quick sanity check
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -237,6 +435,26 @@ if __name__ == "__main__":
     targets = torch.randint(0, 2, (B, H, W)).float()
     loss    = HybridLoss(num_classes=1)(preds, targets)
     print(f"  HybridLoss output: {loss.item():.4f}  (scalar)")
+    assert loss.ndim == 0, "Loss must be a scalar!"
+    print("  PASSED [OK]")
+
+    # ── Lovász-Softmax (multi-class) ──────────────────────────
+    print("\n[Test 3] LovaszSoftmaxLoss (7 classes):")
+    B, C, H, W = 2, 7, 64, 64
+    preds   = torch.randn(B, C, H, W)
+    targets = torch.randint(0, C, (B, H, W))
+    loss    = LovaszSoftmaxLoss()(preds, targets)
+    print(f"  LovaszSoftmaxLoss output: {loss.item():.4f}  (scalar)")
+    assert loss.ndim == 0, "Loss must be a scalar!"
+    print("  PASSED [OK]")
+
+    # ── SwinFANv2Loss (Focal + Dice + Lovász) ─────────────────
+    print("\n[Test 4] SwinFANv2Loss (7 classes):")
+    B, C, H, W = 2, 7, 64, 64
+    preds   = torch.randn(B, C, H, W)
+    targets = torch.randint(0, C, (B, H, W))
+    loss    = SwinFANv2Loss(num_classes=C)(preds, targets)
+    print(f"  SwinFANv2Loss output: {loss.item():.4f}  (scalar)")
     assert loss.ndim == 0, "Loss must be a scalar!"
     print("  PASSED [OK]")
 

@@ -2,9 +2,23 @@
 
 This repository contains a PyTorch implementation of semantic segmentation models for earth observation tasks based on the DeepGlobe dataset. It features the **SwinFAN** architecture (Swin Transformer Encoder + Attention-Guided Decoder).
 
-It supports two main tasks:
-1. **Land Cover Classification**: 7-class multi-label semantic segmentation (DeepGlobe Land Cover).
-2. **Road Extraction**: Binary semantic segmentation (DeepGlobe Road Extraction).
+---
+
+## Model Versions Overview
+
+We support three versions of the SwinFAN architecture, optimized for progressively higher accuracy and better utilization of remote sensing pretraining:
+
+| Feature / Version | SwinFAN-v1 (Baseline) | SwinFAN-v2 (Wider + Lovász) | SwinFAN-v3 (Satlas RS Pretrained) |
+| :--- | :--- | :--- | :--- |
+| **Backbone** | Swin-Tiny (`swin_t`) | Swin-Base (`swin_b`) | Swin-v2-Base (`swin_v2_b`) |
+| **Pretraining** | ImageNet-1K | ImageNet-1K | SatlasPretrain Aerial (`Aerial_SwinB_SI`) |
+| **Model Size** | ~35M parameters | ~100M parameters | ~100M parameters |
+| **Loss Function** | Focal (50%) + Dice (50%) | Focal (30%) + Dice (30%) + Lovász (40%) | Focal (30%) + Dice (30%) + Lovász (40%) |
+| **Batch Size** | 8 | 4 (Grad Accum = 2, Effective = 8) | 4 (Grad Accum = 2, Effective = 8) |
+| **Epochs / LR** | 30 Epochs, LR: 6e-4 | 50 Epochs, LR: 3e-4 | 50 Epochs, LR: 3e-4 |
+| **Target mIoU (6-Class)** | ~0.52 | ~0.60 | **~0.65 – 0.72** |
+| **Training Script** | `scripts/train.py` | `scripts/train_v2.py` | `scripts/train_v3.py` |
+| **Saved Checkpoint** | `output/best_model.pth` | `output/best_model_v2.pth` | `output/best_model_v3.pth` |
 
 ---
 
@@ -32,7 +46,7 @@ ProjCv/
 │   └── infer.py              # Script for full-image inference using sliding-window prediction
 │
 ├── encoder/                  # Multi-scale feature extractor backbones
-│   ├── swin_encoder.py       # Swin-T backbone pre-trained on ImageNet, combined with a lightweight CNN stem
+│   ├── swin_encoder.py       # Backbones for v1 (Swin-T), v2 (Swin-B), and v3 (Satlas Swin-v2-B)
 │   ├── custom_encoder.py     # Legacy hybrid CNN (ResNet-34) + self-attention transformer encoder
 │   └── transformer_block.py  # Standard Transformer blocks used in the legacy CNN-Transformer encoder
 │
@@ -41,16 +55,20 @@ ProjCv/
 │   └── unet_decoder.py       # Standard UNet decoder with convolutional upsampling blocks
 │
 ├── model/                    # Assembly of final segmentation models
-│   └── models.py             # SwinFANModel, HybridSegModel definitions, and build_model() factory
+│   └── models.py             # SwinFANModel (for v1, v2, v3), HybridSegModel definitions, and build_model() factory
 │
 ├── helper/                   # Loss functions and evaluation metrics
-│   ├── losses.py             # HybridLoss (combining Focal Loss and Dice Loss with task weightings)
+│   ├── losses.py             # Focal + Dice Hybrid Loss and Lovász Softmax Loss functions
 │   └── metrics.py            # mIoU, Overall Pixel Accuracy, and F1-Score calculations
 │
 ├── scripts/                  # Entrypoint scripts for execution and training
 │   ├── download_kaggle_dataset.py # Automated helper to fetch datasets from Kaggle using kagglehub
-│   ├── train.py              # Main training script (implements train loop, validation, AMP, and saving checkpoints)
-│   ├── kaggle.ipynb          # Jupyter notebook configuration for training in Kaggle environments
+│   ├── train.py              # Training script for SwinFAN-v1
+│   ├── train_v2.py           # Training script for SwinFAN-v2
+│   ├── train_v3.py           # Training script for SwinFAN-v3
+│   ├── evaluate_model.py     # Detailed per-class evaluation script (works on all checkpoint versions)
+│   ├── kaggle.ipynb          # Jupyter notebook for SwinFAN-v1 on Kaggle
+│   ├── kagglev3.ipynb        # Jupyter notebook for SwinFAN-v3 on Kaggle
 │   └── model_architecture.png # Reference diagram of the network architecture
 │
 └── output/                   # Directory where trained models (.pth) and logs are written
@@ -60,65 +78,72 @@ ProjCv/
 
 ## Key Architectural Details
 
-### 1. SwinFAN (`ARCH: "swinfan"`)
-- **Encoder (`encoder/swin_encoder.py`)**: Uses a pre-trained Swin Transformer (`swin_t`) as a backbone to learn hierarchical context with shifted-window self-attention. To keep fine details from high-resolution layers, we augment it with a lightweight CNN stem (outputs features at strides 1 and 2).
-- **Decoder (`decoder/swinfan_decoder.py`)**: Integrates **Attention Gates (AG)** at each decoding level to filter features forwarded from the encoder skips. This focuses the model's capacity on relevant objects, improving boundaries and edge localization.
-- **Model (`model/models.py`)**: Packages the SwinEncoder, SwinFANDecoder, and a 1x1 Convolutional Segmentation Head.
+### 1. SwinFAN-v1 (`ARCH: "swinfan"`)
+- **Encoder**: Uses a pre-trained Swin Transformer (`swin_t`) as a backbone to learn hierarchical context. Augmented with a lightweight CNN stem (stride-1 raw pixels and stride-2 convolution) to preserve high-resolution spatial features.
+- **Decoder**: Integrates **Attention Gates (AG)** at each decoding level to filter skip-connection features, improving boundaries and edge localization.
+- **Loss**: Balanced 50% Focal Loss and 50% Dice Loss.
 
-### 2. Hybrid Model (`ARCH: "hybrid"`)
-- **Encoder (`encoder/custom_encoder.py`)**: Combines a standard CNN encoder (ResNet-34) for local feature representation with axial-attention Transformer blocks in the bottleneck to capture global dependencies.
-- **Decoder (`decoder/unet_decoder.py`)**: A traditional UNet-style decoder using standard skip connections.
+### 2. SwinFAN-v2 (`ARCH: "swinfan_v2"`)
+- **Encoder**: Upgraded to a wider Swin-Base (`swin_b`) backbone, doubling the channel width from `[3, 48, 96, 192, 384, 768]` to `[3, 48, 128, 256, 512, 1024]`.
+- **Loss**: Incorporates **Lovász Softmax Loss** (40%) along with Focal (30%) and Dice (30%) to directly optimize the Mean Intersection-over-Union (IoU) metric.
+- **Optimizations**: Implements **Gradient Accumulation** (accumulate 2 steps of batch size 4 to get effective batch size 8) to train the 100M parameter model on a 16GB Tesla T4 GPU without Out-Of-Memory (OOM) errors.
 
----
-
-## Configurable Hyperparameters (`config.py`)
-
-All hyperparameters, task settings, and classes are configured in a centralized dictionary `CFG` within `config.py`:
-- `TASK`: Switch between `"land_cover"` (7 classes) or `"road"` (binary classification, 1 class).
-- `ARCH`: Choose model architecture (`"swinfan"` or `"hybrid"`).
-- `DATA_ROOT` / `OUTPUT_DIR`: Path setups for local data or Kaggle environment directories.
-- `IMG_SIZE`: Target height/width of training patches (e.g., 512).
-- `EPOCHS` / `BATCH_SIZE` / `LR` / `WEIGHT_DECAY`: Standard optimizer and scheduling hyperparameters.
-- `FOCAL_WEIGHT` / `DICE_WEIGHT`: Balance parameters between Focal Loss and Dice Loss.
+### 3. SwinFAN-v3 (`ARCH: "swinfan_v3"`)
+- **Encoder**: Uses the modern Swin-v2-Base (`swin_v2_b`) architecture.
+- **Pretraining**: Initialized with weights from **SatlasPretrain** (`Aerial_SwinB_SI`), which was pretrained by Allen AI on 302 million remote sensing labels using 0.5–2 m/pixel aerial imagery. This domain-specific pretraining is a perfect scale match for DeepGlobe (50 cm/pixel) and yields a significant performance boost (+3–5% mIoU).
+- **Auto Weight Caching**: On the first training run, the script automatically downloads the ~503 MB pre-trained checkpoint from Hugging Face and caches it in `/kaggle/working/weights/` (on Kaggle) or `~/.cache/satlas/` (locally).
 
 ---
 
-## Getting Started
+## Getting Started & Usage
 
 ### 1. Install Dependencies
-Make sure you have Python installed, then set up the packages:
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 2. Download the Dataset
-The dataset can be fetched automatically from Kaggle. Run the following helper:
 ```bash
 python scripts/download_kaggle_dataset.py
 ```
-This downloads and organizes files under the `data/` folder.
 
-### 3. Run Shape Tests
-Verify that encoders, decoders, and data ingestion are set up properly on your system:
+### 3. Running Model Training
+
+You can run training for any version independently. Each version outputs to a separate checkpoint path:
+
+- **Train SwinFAN-v1**:
+  ```bash
+  python scripts/train.py
+  ```
+- **Train SwinFAN-v2**:
+  ```bash
+  python scripts/train_v2.py
+  ```
+- **Train SwinFAN-v3**:
+  ```bash
+  python scripts/train_v3.py
+  ```
+
+### 4. Detailed Evaluation
+
+A dedicated evaluation script `scripts/evaluate_model.py` computes and displays a visual per-class evaluation table including IoU and F1-score for all classes, plus overall Pixel Accuracy and the standard 6-class vs 7-class metrics.
+
+Run evaluation by passing the desired checkpoint path:
 ```bash
-# Test the dataloader loading logic
-python -m dataloader.dataloader
+# Evaluate SwinFAN-v1
+python scripts/evaluate_model.py output/best_model.pth
 
-# Test SwinEncoder output shapes
-python encoder/swin_encoder.py
+# Evaluate SwinFAN-v2
+python scripts/evaluate_model.py output/best_model_v2.pth
 
-# Test end-to-end model construction and shape pass-through
-python model/models.py
+# Evaluate SwinFAN-v3
+python scripts/evaluate_model.py output/best_model_v3.pth
 ```
 
-### 4. Run Model Training
-Start the model training and evaluation using:
-```bash
-python scripts/train.py
-```
-This script automatically:
-- Fixes random seeds for reproducibility.
-- Applies data augmentations (flips, rotates, affine crops, color jittering) via `albumentations`.
-- Implements Automatic Mixed Precision (AMP) to speed up execution.
-- Evaluates metrics (**Mean IoU**, **Pixel Accuracy**, and **F1-Score**) at each epoch.
-- Saves the best checkpoint to the `output/` folder based on validation Mean IoU.
+### 5. Running on Kaggle
+
+Two pre-configured Jupyter notebooks are available to easily run training on Kaggle GPUs:
+- Use `scripts/kaggle.ipynb` for **SwinFAN-v1**.
+- Use `scripts/kagglev3.ipynb` for **SwinFAN-v3**.
+
+Both notebooks auto-detect the DeepGlobe dataset root directory and prepare a `.zip` file of your outputs upon completion.
