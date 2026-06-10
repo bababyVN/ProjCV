@@ -411,7 +411,7 @@ class SwinV2BaseEncoder(nn.Module):
         else:
             print("[encoder] SatlasPretrain aerial weights found in cache.")
 
-        # ── Step 2: Load and strip 'backbone.' prefix ─────────────────────────
+        # ── Step 2: Load and strip correct prefix ─────────────────────────
         try:
             ckpt = torch.load(cache_path, map_location="cpu", weights_only=True)
 
@@ -422,17 +422,21 @@ class SwinV2BaseEncoder(nn.Module):
                 elif "state_dict" in ckpt:
                     ckpt = ckpt["state_dict"]
 
-            prefix = "backbone."
-            stripped = {
-                k[len(prefix):]: v
-                for k, v in ckpt.items()
-                if k.startswith(prefix)
-            }
+            # Satlas checkpoints wrap weights inside "backbone.backbone." or "backbone."
+            if any(k.startswith("backbone.backbone.") for k in ckpt.keys()):
+                prefix = "backbone.backbone."
+            elif any(k.startswith("backbone.") for k in ckpt.keys()):
+                prefix = "backbone."
+            else:
+                prefix = ""
 
-            if not stripped:
-                # No "backbone." prefix found — try loading keys directly.
-                print("[encoder] WARNING: No 'backbone.' prefix found in checkpoint.")
-                print("[encoder] Attempting direct state_dict load...")
+            if prefix:
+                stripped = {
+                    k[len(prefix):]: v
+                    for k, v in ckpt.items()
+                    if k.startswith(prefix)
+                }
+            else:
                 stripped = ckpt
 
             missing, unexpected = backbone.load_state_dict(stripped, strict=False)

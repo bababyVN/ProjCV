@@ -287,15 +287,34 @@ def main():
         dice_weight=0.3,
         lovasz_weight=0.4,
     )
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=CFG_V3["LR"],
-        weight_decay=CFG_V3["WEIGHT_DECAY"],
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    # Split parameters into pretrained encoder and new decoder/head groups
+    encoder_params = list(model.encoder.parameters())
+    decoder_params = list(model.decoder.parameters()) + list(model.head.parameters())
+
+    optimizer = torch.optim.AdamW([
+        {"params": encoder_params, "lr": CFG_V3["LR"] * 0.1},  # 3e-5 (pretrained)
+        {"params": decoder_params, "lr": CFG_V3["LR"]}         # 3e-4 (scratch)
+    ], weight_decay=CFG_V3["WEIGHT_DECAY"])
+
+    # 1. Warmup scheduler: linear from 1% to 100% of base_lr over 5 epochs
+    warmup_epochs = 5
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
         optimizer,
-        T_max=CFG_V3["EPOCHS"],
+        start_factor=0.01,
+        end_factor=1.0,
+        total_iters=warmup_epochs,
+    )
+    # 2. Decay scheduler: cosine decay over the remaining 45 epochs
+    decay_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=CFG_V3["EPOCHS"] - warmup_epochs,
         eta_min=CFG_V3["ETA_MIN"],
+    )
+    # 3. Combine them using SequentialLR
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, decay_scheduler],
+        milestones=[warmup_epochs],
     )
     scaler = _make_scaler(device)
 
@@ -309,9 +328,14 @@ def main():
     }
 
     for epoch in range(1, CFG_V3["EPOCHS"] + 1):
+        # Retrieve learning rates for display
+        lrs = scheduler.get_last_lr()
+        lr_enc = lrs[0]
+        lr_dec = lrs[1] if len(lrs) > 1 else lrs[0]
+
         print(f"{'-' * 60}")
         print(f"  Epoch [{epoch:02d}/{CFG_V3['EPOCHS']:02d}]"
-              f"  |  LR: {scheduler.get_last_lr()[0]:.2e}")
+              f"  |  LR (Enc/Dec): {lr_enc:.1e}/{lr_dec:.1e}")
         print(f"{'-' * 60}")
 
         # Train
