@@ -259,13 +259,26 @@ def run_segmentation(
         # 2. Get/load model
         model = load_and_cache_model(version_key)
         
-        # 3. Perform Inference
+        # 3. Handle arbitrary input image sizes by padding to at least 512x512
+        H, W = input_img.shape[:2]
+        pad_h = max(0, 512 - H)
+        pad_w = max(0, 512 - W)
+        if pad_h > 0 or pad_w > 0:
+            padded_img = cv2.copyMakeBorder(input_img, 0, pad_h, 0, pad_w, cv2.BORDER_REFLECT)
+        else:
+            padded_img = input_img
+
+        # Perform Inference on padded image
         if infer_mode == "Potato Mode (Fast Single-Pass)":
-            pred_indices = potato_inference(model, input_img)
+            pred_indices = potato_inference(model, padded_img)
         else:
             pred_indices = sliding_window_inference_gradio(
-                model, input_img, patch_size=512, overlap=64, num_classes=7, progress=progress
+                model, padded_img, patch_size=512, overlap=64, num_classes=7, progress=progress
             )
+            
+        # Crop back to the original size
+        if pad_h > 0 or pad_w > 0:
+            pred_indices = pred_indices[:H, :W]
             
         elapsed_time = time.time() - start_time
         
