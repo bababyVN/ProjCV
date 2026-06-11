@@ -30,6 +30,7 @@ Below is an overview of the directory structure and the roles of the key files:
 
 ```
 ProjCv/
+├── app.py                    # Gradio interactive satellite segmentation dashboard
 ├── config.py                 # Global hyperparameters, class details, paths, and task switches
 ├── requirements.txt          # Package dependencies (PyTorch, Albumentations, OpenCV, etc.)
 ├── LICENSE                   # Project license (MIT)
@@ -138,3 +139,13 @@ Two pre-configured Jupyter notebooks are available to easily run training on Kag
 - Use `scripts/kagglev3.ipynb` for **SwinFAN-v3**.
 
 Both notebooks auto-detect the DeepGlobe dataset root directory and prepare a `.zip` file of your outputs upon completion.
+
+### 6. Running the Gradio Web Application
+
+We provide an interactive Gradio web application for real-time model evaluation and segmentation visualization. Users can upload custom satellite images, select model backbones (SwinFAN-T or SwinFAN-B), toggle between **Potato Mode** (fast CPU-friendly downsampled inference) and **Standard Mode** (sliding window inference), and dynamically adjust mask overlay opacity in real-time.
+
+Run the dashboard locally with:
+```bash
+python app.py
+```
+By default, the server runs on loopback `http://127.0.0.1:7860`. If port 7860 is already occupied, it automatically binds to the next available port (e.g. `7861`, `7862`, etc.).
